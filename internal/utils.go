@@ -8,15 +8,33 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"io"
 	"log"
 	"math/big"
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/quic-go/quic-go"
 )
+
+// BufferPool is a pool of 32KB buffers to reduce GC pressure during data copying.
+var BufferPool = sync.Pool{
+	New: func() interface{} {
+		b := make([]byte, 32*1024)
+		return &b
+	},
+}
+
+// CopyBuffer copies from src to dst using a buffer from the pool.
+// This is more efficient than io.Copy which allocates a new buffer for each call.
+func CopyBuffer(dst io.Writer, src io.Reader) (int64, error) {
+	bufPtr := BufferPool.Get().(*[]byte)
+	defer BufferPool.Put(bufPtr)
+	return io.CopyBuffer(dst, src, *bufPtr)
+}
 
 // PortMapping represents a network port forwarding rule.
 type PortMapping struct {
@@ -117,18 +135,13 @@ func GenerateCert(privKey *ecdsa.PrivateKey, pubKey *ecdsa.PublicKey) ([][]byte,
 }
 
 // DefaultQuicConfig returns a MASQUE compatible default QUIC configuration with specified keep-alive period and initial packet size.
-//
-// Parameters:
-//   - keepalivePeriod: time.Duration - The duration for sending QUIC keep-alive packets.
-//   - initialPacketSize: uint16 - The initial size of QUIC packets. (1242 seems used by the original implementation)
-//
-// Returns:
-//   - *quic.Config: A pointer to a configured QUIC configuration object.
 func DefaultQuicConfig(keepalivePeriod time.Duration, initialPacketSize uint16) *quic.Config {
 	return &quic.Config{
-		EnableDatagrams:   true,
-		InitialPacketSize: initialPacketSize,
-		KeepAlivePeriod:   keepalivePeriod,
+		EnableDatagrams:      true,
+		InitialPacketSize:    initialPacketSize,
+		KeepAlivePeriod:      keepalivePeriod,
+		MaxIdleTimeout:       30 * time.Second,
+		HandshakeIdleTimeout: 3 * time.Second,
 	}
 }
 
@@ -270,6 +283,47 @@ func isValidHostname(hostname string) bool {
 //   - string: The base64-encoded "username:password" string.
 func LoginToBase64(username, password string) string {
 	return base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+}
+
+// GetNextEndpoint toggles the last byte of the IP address between 1 and 2.
+// This is a heuristic to find an alternative Cloudflare Warp endpoint,
+// as observation shows that if .1 is blocked, .2 often works (and vice versa).
+func GetNextEndpoint(addr *net.UDPAddr) *net.UDPAddr {
+	if addr == nil || len(addr.IP) == 0 {
+		return nil
+	}
+	newAddr := &net.UDPAddr{
+		IP:   make(net.IP, len(addr.IP)),
+		Port: addr.Port,
+	}
+	copy(newAddr.IP, addr.IP)
+
+	// Check if IPv4
+	if ip4 := newAddr.IP.To4(); ip4 != nil {
+		// IPv4 is 4 bytes, usually represented as 16 bytes in Go if mapped.
+		// To4() returns the 4-byte representation.
+		// However, we need to modify newAddr.IP which might be 16 bytes.
+		// Let's modify the last byte of the slice directly, assuming standard layout.
+		lastIdx := len(newAddr.IP) - 1
+		if newAddr.IP[lastIdx] == 1 {
+			newAddr.IP[lastIdx] = 2
+			return newAddr
+		} else if newAddr.IP[lastIdx] == 2 {
+			newAddr.IP[lastIdx] = 1
+			return newAddr
+		}
+	} else {
+		// IPv6
+		lastIdx := len(newAddr.IP) - 1
+		if newAddr.IP[lastIdx] == 1 {
+			newAddr.IP[lastIdx] = 2
+			return newAddr
+		} else if newAddr.IP[lastIdx] == 2 {
+			newAddr.IP[lastIdx] = 1
+			return newAddr
+		}
+	}
+	return nil
 }
 
 // CheckIfname validates a network interface name according to the following rules:

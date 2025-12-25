@@ -13,29 +13,12 @@ import (
 // TunnelDNSResolver implements a DNS resolver that uses the provided DNS servers
 // either inside a MASQUE tunnel (if TunNet is set) or over the system network (if TunNet is nil).
 type TunnelDNSResolver struct {
-	// TunNet is the network stack for the tunnel you want to use for DNS resolution.
-	// If nil, DNS queries are sent over the system network.
-	TunNet *netstack.Net
-
-	// DNSAddrs is the list of DNS servers to use for resolution.
+	TunNet   *netstack.Net
 	DNSAddrs []netip.Addr
-
-	// Timeout is the timeout for DNS queries on a specific server before trying the next one.
-	Timeout time.Duration
+	Timeout  time.Duration
 }
 
 // Resolve performs a DNS lookup using the provided DNS resolvers.
-// It tries each resolver in order until one succeeds, sending queries either through the tunnel
-// or over the system network depending on TunNet.
-//
-// Parameters:
-//   - ctx: context.Context - The context for the DNS lookup.
-//   - name: string - The domain name to resolve.
-//
-// Returns:
-//   - context.Context: The original context for the DNS lookup.
-//   - net.IP: The resolved IP address.
-//   - error: An error if the lookup fails.
 func (r TunnelDNSResolver) Resolve(ctx context.Context, name string) (context.Context, net.IP, error) {
 	if len(r.DNSAddrs) == 0 {
 		return ctx, nil, fmt.Errorf("no DNS servers configured")
@@ -97,15 +80,6 @@ func (r TunnelDNSResolver) Resolve(ctx context.Context, name string) (context.Co
 	return ctx, nil, fmt.Errorf("all DNS servers failed: %v", lastErr)
 }
 
-// NewNetstackResolver returns a *net.Resolver that uses the tunnel network stack
-// and provided DNS servers for DNS queries.
-//
-// Parameters:
-//   - tunNet: *netstack.Net - The tunnel network stack.
-//   - dnsAddrs: []netip.Addr - DNS server addresses.
-//
-// Returns:
-//   - *net.Resolver - A resolver that routes queries through the tunnel.
 func NewNetstackResolver(tunNet *netstack.Net, dnsAddrs []netip.Addr) *net.Resolver {
 	return &net.Resolver{
 		PreferGo: true,
@@ -119,14 +93,6 @@ func NewNetstackResolver(tunNet *netstack.Net, dnsAddrs []netip.Addr) *net.Resol
 	}
 }
 
-// NewStaticResolver returns a *net.Resolver that uses the provided DNS servers
-// for lookups over the system network.
-//
-// Parameters:
-//   - dnsAddrs: []netip.Addr - DNS server addresses.
-//
-// Returns:
-//   - *net.Resolver - A resolver that routes queries over the system network.
 func NewStaticResolver(dnsAddrs []netip.Addr) *net.Resolver {
 	return &net.Resolver{
 		PreferGo: true,
@@ -140,20 +106,18 @@ func NewStaticResolver(dnsAddrs []netip.Addr) *net.Resolver {
 	}
 }
 
-// GetProxyResolver returns the appropriate *net.Resolver for proxy use
-// based on the localDNS flag.
-//
-// Parameters:
-//   - localDNS: bool - Whether to use the system network for DNS.
-//   - tunNet: *netstack.Net - The tunnel network stack (if localDNS is false).
-//   - dnsAddrs: []netip.Addr - DNS server addresses.
-//   - timeout: time.Duration - Timeout for DNS queries.
-//
-// Returns:
-//   - *net.Resolver - A resolver suitable for use with proxy connections.
+// GetProxyResolver returns the appropriate *net.Resolver for proxy use.
 func GetProxyResolver(localDNS bool, tunNet *netstack.Net, dnsAddrs []netip.Addr, timeout time.Duration) *net.Resolver {
 	if localDNS {
 		return NewStaticResolver(dnsAddrs)
 	}
 	return NewNetstackResolver(tunNet, dnsAddrs)
+}
+
+// GetSocksResolver returns the appropriate TunnelDNSResolver for SOCKS proxy use.
+func GetSocksResolver(localDNS bool, tunNet *netstack.Net, dnsAddrs []netip.Addr, timeout time.Duration) TunnelDNSResolver {
+	if localDNS {
+		return TunnelDNSResolver{TunNet: nil, DNSAddrs: dnsAddrs, Timeout: timeout}
+	}
+	return TunnelDNSResolver{TunNet: tunNet, DNSAddrs: dnsAddrs, Timeout: timeout}
 }
