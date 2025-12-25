@@ -1,17 +1,8 @@
 package api
 
 import (
-	"context"
-	"crypto/tls"
-	"errors"
-	"fmt"
-	"log"
-	"net"
 	"sync"
-	"time"
 
-	connectip "github.com/Diniboy1123/connect-ip-go"
-	"github.com/Diniboy1123/usque/internal"
 	"github.com/songgao/water"
 	"golang.zx2c4.com/wireguard/tun"
 )
@@ -141,116 +132,4 @@ func (w *WaterAdapter) WritePacket(pkt []byte) error {
 // NewWaterAdapter creates a new WaterAdapter.
 func NewWaterAdapter(iface *water.Interface) TunnelDevice {
 	return &WaterAdapter{iface: iface}
-}
-
-// MaintainTunnel continuously connects to the MASQUE server, then starts two
-// forwarding goroutines: one forwarding from the device to the IP connection (and handling
-// any ICMP reply), and the other forwarding from the IP connection to the device.
-// If an error occurs in either loop, the connection is closed and a reconnect is attempted.
-//
-// Parameters:
-//   - ctx: context.Context - The context for the connection.
-//   - tlsConfig: *tls.Config - The TLS configuration for secure communication.
-//   - keepalivePeriod: time.Duration - The keepalive period for the QUIC connection.
-//   - initialPacketSize: uint16 - The initial packet size for the QUIC connection.
-//   - endpoint: *net.UDPAddr - The UDP address of the MASQUE server.
-//   - device: TunnelDevice - The TUN device to forward packets to and from.
-//   - mtu: int - The MTU of the TUN device.
-//   - reconnectDelay: time.Duration - The delay between reconnect attempts.
-func MaintainTunnel(ctx context.Context, tlsConfig *tls.Config, keepalivePeriod time.Duration, initialPacketSize uint16, endpoint *net.UDPAddr, device TunnelDevice, mtu int, reconnectDelay time.Duration) {
-	packetBufferPool := NewNetBuffer(mtu)
-	for {
-		log.Printf("Establishing MASQUE connection to %s:%d", endpoint.IP, endpoint.Port)
-		udpConn, tr, ipConn, rsp, err := ConnectTunnel(
-			ctx,
-			tlsConfig,
-			internal.DefaultQuicConfig(keepalivePeriod, initialPacketSize),
-			internal.ConnectURI,
-			endpoint,
-		)
-		if err != nil {
-			log.Printf("Failed to connect tunnel: %v", err)
-			time.Sleep(reconnectDelay)
-			continue
-		}
-		if rsp.StatusCode != 200 {
-			log.Printf("Tunnel connection failed: %s", rsp.Status)
-			ipConn.Close()
-			if udpConn != nil {
-				udpConn.Close()
-			}
-			if tr != nil {
-				tr.Close()
-			}
-			time.Sleep(reconnectDelay)
-			continue
-		}
-
-		log.Println("Connected to MASQUE server")
-		errChan := make(chan error, 2)
-
-		go func() {
-			for {
-				buf := packetBufferPool.Get()
-				n, err := device.ReadPacket(buf)
-				if err != nil {
-					packetBufferPool.Put(buf)
-					errChan <- fmt.Errorf("failed to read from TUN device: %v", err)
-					return
-				}
-				icmp, err := ipConn.WritePacket(buf[:n])
-				if err != nil {
-					packetBufferPool.Put(buf)
-					if errors.As(err, new(*connectip.CloseError)) {
-						errChan <- fmt.Errorf("connection closed while writing to IP connection: %v", err)
-						return
-					}
-					log.Printf("Error writing to IP connection: %v, continuing...", err)
-					continue
-				}
-				packetBufferPool.Put(buf)
-
-				if len(icmp) > 0 {
-					if err := device.WritePacket(icmp); err != nil {
-						if errors.As(err, new(*connectip.CloseError)) {
-							errChan <- fmt.Errorf("connection closed while writing ICMP to TUN device: %v", err)
-							return
-						}
-						log.Printf("Error writing ICMP to TUN device: %v, continuing...", err)
-					}
-				}
-			}
-		}()
-
-		go func() {
-			buf := packetBufferPool.Get()
-			defer packetBufferPool.Put(buf)
-			for {
-				n, err := ipConn.ReadPacket(buf, true)
-				if err != nil {
-					if errors.As(err, new(*connectip.CloseError)) {
-						errChan <- fmt.Errorf("connection closed while reading from IP connection: %v", err)
-						return
-					}
-					log.Printf("Error reading from IP connection: %v, continuing...", err)
-					continue
-				}
-				if err := device.WritePacket(buf[:n]); err != nil {
-					errChan <- fmt.Errorf("failed to write to TUN device: %v", err)
-					return
-				}
-			}
-		}()
-
-		err = <-errChan
-		log.Printf("Tunnel connection lost: %v. Reconnecting...", err)
-		ipConn.Close()
-		if udpConn != nil {
-			udpConn.Close()
-		}
-		if tr != nil {
-			tr.Close()
-		}
-		time.Sleep(reconnectDelay)
-	}
 }
