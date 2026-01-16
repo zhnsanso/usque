@@ -1,5 +1,4 @@
 project_name: usque
-version: 2
 builds:
   - id: android
     goos:
@@ -14,11 +13,11 @@ builds:
       - CGO_ENABLED=0
     flags:
       - -trimpath
-    ldflags:
+    ldflags: &ldflags
       - "-s -w"
-      - "-X github.com/Diniboy1123/usque/cmd.version={{.Tag}}"
-      - "-X github.com/Diniboy1123/usque/cmd.commit={{.Commit}}"
-      - "-X github.com/Diniboy1123/usque/cmd.date={{.Date}}"
+      - "-X {{ .ModulePath }}/cmd.version={{.Tag}}"
+      - "-X {{ .ModulePath }}/cmd.commit={{.Commit}}"
+      - "-X {{ .ModulePath }}/cmd.date={{.Date}}"
   
   - id: linux-amd64
     goos:
@@ -29,11 +28,7 @@ builds:
       - CGO_ENABLED=0
     flags:
       - -trimpath
-    ldflags:
-      - "-s -w"
-      - "-X github.com/Diniboy1123/usque/cmd.version={{.Tag}}"
-      - "-X github.com/Diniboy1123/usque/cmd.commit={{.Commit}}"
-      - "-X github.com/Diniboy1123/usque/cmd.date={{.Date}}"
+    ldflags: *ldflags
 
   - id: linux-arm
     goos:
@@ -48,11 +43,7 @@ builds:
       - CGO_ENABLED=0
     flags:
       - -trimpath
-    ldflags:
-      - "-s -w"
-      - "-X github.com/Diniboy1123/usque/cmd.version={{.Tag}}"
-      - "-X github.com/Diniboy1123/usque/cmd.commit={{.Commit}}"
-      - "-X github.com/Diniboy1123/usque/cmd.date={{.Date}}"
+    ldflags: *ldflags
 
   - id: linux-arm64
     goos:
@@ -63,11 +54,7 @@ builds:
       - CGO_ENABLED=0
     flags:
       - -trimpath
-    ldflags:
-      - "-s -w"
-      - "-X github.com/Diniboy1123/usque/cmd.version={{.Tag}}"
-      - "-X github.com/Diniboy1123/usque/cmd.commit={{.Commit}}"
-      - "-X github.com/Diniboy1123/usque/cmd.date={{.Date}}"
+    ldflags: *ldflags
 
   - id: linux-mips
     goos:
@@ -81,11 +68,7 @@ builds:
       - CGO_ENABLED=0
     flags:
       - -trimpath
-    ldflags:
-      - "-s -w"
-      - "-X github.com/Diniboy1123/usque/cmd.version={{.Tag}}"
-      - "-X github.com/Diniboy1123/usque/cmd.commit={{.Commit}}"
-      - "-X github.com/Diniboy1123/usque/cmd.date={{.Date}}"
+    ldflags: *ldflags
 
   - id: windows
     goos:
@@ -97,11 +80,7 @@ builds:
       - CGO_ENABLED=0
     flags:
       - -trimpath
-    ldflags:
-      - "-s -w"
-      - "-X github.com/Diniboy1123/usque/cmd.version={{.Tag}}"
-      - "-X github.com/Diniboy1123/usque/cmd.commit={{.Commit}}"
-      - "-X github.com/Diniboy1123/usque/cmd.date={{.Date}}"
+    ldflags: *ldflags
 
   - id: darwin
     goos:
@@ -113,11 +92,7 @@ builds:
       - CGO_ENABLED=0
     flags:
       - -trimpath
-    ldflags:
-      - "-s -w"
-      - "-X github.com/Diniboy1123/usque/cmd.version={{.Tag}}"
-      - "-X github.com/Diniboy1123/usque/cmd.commit={{.Commit}}"
-      - "-X github.com/Diniboy1123/usque/cmd.date={{.Date}}"
+    ldflags: *ldflags
 
 archives:
   - formats:
@@ -129,8 +104,3 @@ archives:
 
 checksum:
   name_template: "checksums.txt"
-
-release:
-  github:
-    owner: Diniboy1123
-    name: usque

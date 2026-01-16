@@ -1,0 +1,85 @@
+name: Preview Build
+
+on:
+  pull_request:
+
+jobs:
+  build-for-pr:
+    name: 🧪 Build for PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🛠️ Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: 🚀 Run GoReleaser in build mode
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: build --snapshot --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📤 Upload Android arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: usque-android-arm64
+          path: dist/usque_*_android_arm64.zip
+          if-no-files-found: error
+
+      - name: 📤 Upload Linux amd64
+        uses: actions/upload-artifact@v4
+        with:
+          name: usque-linux-amd64
+          path: dist/usque_*_linux_amd64.zip
+          if-no-files-found: error
+      
+      - name: 📤 Upload Linux arm
+        uses: actions/upload-artifact@v4
+        with:
+          name: usque-linux-arm
+          path: dist/usque_*_linux_armv*.zip
+          if-no-files-found: error
+
+      - name: 📤 Upload Linux arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: usque-linux-arm64
+          path: dist/usque_*_linux_arm64.zip
+          if-no-files-found: error
+
+      - name: 📤 Upload Linux MIPS
+        uses: actions/upload-artifact@v4
+        with:
+          name: usque-linux-mips
+          path: dist/usque_*_linux_mips*.zip
+          if-no-files-found: error
+
+      - name: 📤 Upload Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: usque-windows
+          path: dist/usque_*_windows_*.zip
+          if-no-files-found: error
+
+      - name: 📤 Upload Darwin (macOS)
+        uses: actions/upload-artifact@v4
+        with:
+          name: usque-darwin
+          path: dist/usque_*_darwin_*.zip
+          if-no-files-found: error
+
+      - name: 📝 Post Summary
+        run: |
+          echo "### ✅ Build successful!" >> $GITHUB_STEP_SUMMARY
+          echo "Build artifacts for each platform are available for download from the 'Artifacts' section of this workflow run." >> $GITHUB_STEP_SUMMARY
