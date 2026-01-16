@@ -1,14 +1,17 @@
-package api
+package masque
 
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
+	"time"
 
 	connectip "github.com/Diniboy1123/connect-ip-go"
 	"github.com/quic-go/quic-go"
@@ -18,16 +21,6 @@ import (
 
 // PrepareTlsConfig creates a TLS configuration using the provided certificate and SNI (Server Name Indication).
 // It also verifies the peer's public key against the provided public key.
-//
-// Parameters:
-//   - privKey: *ecdsa.PrivateKey - The private key to use for TLS authentication.
-//   - peerPubKey: *ecdsa.PublicKey - The endpoint's public key to pin to.
-//   - cert: [][]byte - The certificate chain to use for TLS authentication.
-//   - sni: string - The Server Name Indication (SNI) to use.
-//
-// Returns:
-//   - *tls.Config: A TLS configuration for secure communication.
-//   - error: An error if TLS setup fails.
 func PrepareTlsConfig(privKey *ecdsa.PrivateKey, peerPubKey *ecdsa.PublicKey, cert [][]byte, sni string) (*tls.Config, error) {
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{
@@ -52,17 +45,10 @@ func PrepareTlsConfig(privKey *ecdsa.PrivateKey, peerPubKey *ecdsa.PublicKey, ce
 			}
 
 			if _, ok := cert.PublicKey.(*ecdsa.PublicKey); !ok {
-				// we only support ECDSA
-				// TODO: don't hardcode cert type in the future
-				// as backend can start using different cert types
 				return x509.ErrUnsupportedAlgorithm
 			}
 
 			if !cert.PublicKey.(*ecdsa.PublicKey).Equal(peerPubKey) {
-				// reason is incorrect, but the best I could figure
-				// detail explains the actual reason
-
-				//10 is NoValidChains, but we support go1.22 where it's not defined
 				return x509.CertificateInvalidError{Cert: cert, Reason: 10, Detail: "remote endpoint has a different public key than what we trust in config.json"}
 			}
 
@@ -74,22 +60,6 @@ func PrepareTlsConfig(privKey *ecdsa.PrivateKey, peerPubKey *ecdsa.PublicKey, ce
 }
 
 // ConnectTunnel establishes a QUIC connection and sets up a Connect-IP tunnel with the provided endpoint.
-// Endpoint address is used to check whether the authentication/connection is successful or not.
-// Requires modified connect-ip-go for now to support Cloudflare's non RFC compliant implementation.
-//
-// Parameters:
-//   - ctx: context.Context - The QUIC TLS context.
-//   - tlsConfig: *tls.Config - The TLS configuration for secure communication.
-//   - quicConfig: *quic.Config - The QUIC configuration settings.
-//   - connectUri: string - The URI template for the Connect-IP request.
-//   - endpoint: *net.UDPAddr - The UDP address of the QUIC server.
-//
-// Returns:
-//   - *net.UDPConn: The UDP connection used for the QUIC session.
-//   - *http3.Transport: The HTTP/3 transport used for initial request.
-//   - *connectip.Conn: The Connect-IP connection instance.
-//   - *http.Response: The response from the Connect-IP handshake.
-//   - error: An error if the connection setup fails.
 func ConnectTunnel(ctx context.Context, tlsConfig *tls.Config, quicConfig *quic.Config, connectUri string, endpoint *net.UDPAddr) (*net.UDPConn, *http3.Transport, *connectip.Conn, *http.Response, error) {
 	var udpConn *net.UDPConn
 	var err error
@@ -122,10 +92,6 @@ func ConnectTunnel(ctx context.Context, tlsConfig *tls.Config, quicConfig *quic.
 	tr := &http3.Transport{
 		EnableDatagrams: true,
 		AdditionalSettings: map[uint64]uint64{
-			// official client still sends this out as well, even though
-			// it's deprecated, see https://datatracker.ietf.org/doc/draft-ietf-masque-h3-datagram/00/
-			// SETTINGS_H3_DATAGRAM_00 = 0x0000000000000276
-			// https://github.com/cloudflare/quiche/blob/7c66757dbc55b8d0c3653d4b345c6785a181f0b7/quiche/src/h3/frame.rs#L46
 			0x276: 1,
 		},
 		DisableCompression: true,
@@ -147,4 +113,27 @@ func ConnectTunnel(ctx context.Context, tlsConfig *tls.Config, quicConfig *quic.
 	}
 
 	return udpConn, tr, ipConn, rsp, nil
+}
+
+// DefaultQuicConfig returns a MASQUE compatible default QUIC configuration with specified keep-alive period and initial packet size.
+func DefaultQuicConfig(keepalivePeriod time.Duration, initialPacketSize uint16) *quic.Config {
+	return &quic.Config{
+		EnableDatagrams:   true,
+		InitialPacketSize: initialPacketSize,
+		KeepAlivePeriod:   keepalivePeriod,
+	}
+}
+
+// GenerateCert creates a self-signed certificate using the provided ECDSA private and public keys.
+func GenerateCert(privKey *ecdsa.PrivateKey, pubKey *ecdsa.PublicKey) ([][]byte, error) {
+	cert, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
+		SerialNumber: big.NewInt(0),
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(1 * 24 * time.Hour),
+	}, &x509.Certificate{}, &privKey.PublicKey, privKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return [][]byte{cert}, nil
 }

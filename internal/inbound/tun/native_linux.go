@@ -1,24 +1,22 @@
 //go:build linux
 
-package cmd
+package tun
 
 import (
 	"fmt"
 	"log"
 	"net"
 
-	"github.com/Diniboy1123/usque/api"
 	"github.com/Diniboy1123/usque/config"
+	"github.com/Diniboy1123/usque/internal/stack"
 	"github.com/songgao/water"
 	"github.com/vishvananda/netlink"
 )
 
-var longDescription = "Expose Warp as a native TUN device that accepts any IP traffic." +
-	" Requires root, tun.ko, and iproute2."
-
-func (t *tunDevice) create() (api.TunnelDevice, error) {
+// newNativeDevice creates a new native TUN device on Linux.
+func newNativeDevice(ifaceName string, mtu int) (stack.Stack, error) {
 	platformSpecificParams := water.PlatformSpecificParams{
-		Name: t.name,
+		Name: ifaceName,
 	}
 
 	dev, err := water.New(water.Config{DeviceType: water.TUN, PlatformSpecificParams: platformSpecificParams})
@@ -26,18 +24,23 @@ func (t *tunDevice) create() (api.TunnelDevice, error) {
 		return nil, err
 	}
 
-	t.name = dev.Name()
+	ifaceName = dev.Name()
 
-	if t.iproute2 {
-		link, err := netlink.LinkByName(dev.Name())
+	// In the future, these would come from config.
+	useIproute2 := true
+	enableIPv4 := true
+	enableIPv6 := true
+
+	if useIproute2 {
+		link, err := netlink.LinkByName(ifaceName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get link: %v", err)
 		}
 
-		if err := netlink.LinkSetMTU(link, t.mtu); err != nil {
+		if err := netlink.LinkSetMTU(link, mtu); err != nil {
 			return nil, fmt.Errorf("failed to set MTU: %v", err)
 		}
-		if t.ipv4 {
+		if enableIPv4 {
 			if err := netlink.AddrAdd(link, &netlink.Addr{
 				IPNet: &net.IPNet{
 					IP:   net.ParseIP(config.AppConfig.IPv4),
@@ -46,7 +49,7 @@ func (t *tunDevice) create() (api.TunnelDevice, error) {
 				return nil, fmt.Errorf("failed to add IPv4 address: %v", err)
 			}
 		}
-		if t.ipv6 {
+		if enableIPv6 {
 			if err := netlink.AddrAdd(link, &netlink.Addr{
 				IPNet: &net.IPNet{
 					IP:   net.ParseIP(config.AppConfig.IPv6),
@@ -65,5 +68,5 @@ func (t *tunDevice) create() (api.TunnelDevice, error) {
 		log.Printf("IPv6: %s", config.AppConfig.IPv6)
 	}
 
-	return api.NewWaterAdapter(dev), nil
+	return stack.NewWaterAdapter(dev), nil
 }
